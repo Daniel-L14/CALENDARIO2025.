@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Calendario Sencillo</title>
+  <style>
+    :root{ --bg:#f7f7fb; --card:#ffffff; --accent:#3b82f6; --muted:#6b7280; --today:#fde68a; }
+    *{box-sizing:border-box;font-family:Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial}
+    body{margin:0;background:var(--bg);color:#111;display:flex;align-items:flex-start;justify-content:center;padding:32px}
+    .container{width:100%;max-width:920px}
+    .card{background:var(--card);border-radius:12px;box-shadow:0 6px 18px rgba(15,23,42,0.08);padding:18px}
+
+    header.calendar-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+    .nav{display:flex;gap:8px;align-items:center}
+    button.btn{background:transparent;border:1px solid transparent;padding:8px 12px;border-radius:8px;cursor:pointer}
+    button.primary{background:var(--accent);color:#fff;border-color:transparent}
+    button.icon{width:40px;height:40px;display:inline-grid;place-items:center;border-radius:8px}
+
+    h1.month{font-size:20px;margin:0}
+    .weekdays{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:8px}
+    .weekday{color:var(--muted);font-size:13px;text-align:center;padding:8px 6px}
+
+    .grid{display:grid;grid-template-columns:repeat(7,1fr);gap:8px}
+    .day{min-height:86px;border-radius:8px;padding:8px;background:linear-gradient(180deg, rgba(0,0,0,0.01), transparent);position:relative}
+    .day.disabled{opacity:0.35}
+    .day .date{font-weight:600}
+    .day .events{position:absolute;left:8px;right:8px;bottom:8px;display:flex;flex-direction:column;gap:4px}
+    .event-dot{font-size:12px;padding:4px 6px;border-radius:6px;background:#eef2ff;color:#1e293b;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+
+    .today{outline:3px solid rgba(59,130,246,0.12);background:var(--today)}
+
+    /* side panel */
+    .side{margin-left:16px;width:300px}
+    .panel{background:var(--card);border-radius:12px;padding:12px;box-shadow:0 6px 18px rgba(15,23,42,0.06)}
+    .panel h2{margin:0 0 10px 0;font-size:16px}
+    .events-list{display:flex;flex-direction:column;gap:8px;max-height:300px;overflow:auto}
+    input[type=text]{width:100%;padding:8px;border-radius:8px;border:1px solid #e6e9ef}
+
+    .small{font-size:13px;color:var(--muted)}
+
+    @media (max-width:900px){body{padding:16px} .side{display:none} .container{max-width:700px}}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div style="display:flex;gap:16px;flex-direction:row;align-items:flex-start">
+      <div class="card" style="flex:1">
+        <header class="calendar-header">
+          <div class="nav">
+            <button id="prev" class="btn icon">◀</button>
+            <button id="next" class="btn icon">▶</button>
+            <button id="todayBtn" class="btn">Hoy</button>
+          </div>
+          <h1 class="month" id="monthYear">Mes Año</h1>
+          <div class="nav">
+            <button id="addQuick" class="btn primary">Añadir evento</button>
+          </div>
+        </header>
+
+        <div class="weekdays" id="weekdays"></div>
+        <div class="grid" id="daysGrid"></div>
+      </div>
+
+      <div class="side">
+        <div class="panel">
+          <h2>Eventos del día</h2>
+          <p class="small" id="selectedDateText">Selecciona una fecha</p>
+          <div style="display:flex;gap:8px;margin:8px 0">
+            <input id="eventInput" type="text" placeholder="Descripción del evento" />
+            <button id="saveEvent" class="btn primary">Guardar</button>
+          </div>
+          <div class="events-list" id="eventsList"></div>
+          <p class="small" style="margin-top:10px">Los eventos se guardan en tu navegador (localStorage).</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Calendario sencillo: genera una vista mensual, navegar entre meses, agregar y mostrar eventos (localStorage)
+    const monthYearEl = document.getElementById('monthYear');
+    const daysGrid = document.getElementById('daysGrid');
+    const weekdaysRow = document.getElementById('weekdays');
+    const prevBtn = document.getElementById('prev');
+    const nextBtn = document.getElementById('next');
+    const todayBtn = document.getElementById('todayBtn');
+    const addQuick = document.getElementById('addQuick');
+
+    const selectedDateText = document.getElementById('selectedDateText');
+    const eventsList = document.getElementById('eventsList');
+    const eventInput = document.getElementById('eventInput');
+    const saveEventBtn = document.getElementById('saveEvent');
+
+    const weekdays = ['Lun','Mar','Mie','Jue','Vie','Sab','Dom'];
+
+    let viewDate = new Date(); // fecha que se muestra (primer día del mes)
+    let selectedDate = null;
+
+    function startOfMonth(d){ return new Date(d.getFullYear(), d.getMonth(), 1); }
+    function endOfMonth(d){ return new Date(d.getFullYear(), d.getMonth()+1, 0); }
+
+    function keyForDate(date){ // yyyy-mm-dd
+      const y = date.getFullYear();
+      const m = String(date.getMonth()+1).padStart(2,'0');
+      const da = String(date.getDate()).padStart(2,'0');
+      return `${y}-${m}-${da}`;
+    }
+
+    function loadEvents(){
+      try{ return JSON.parse(localStorage.getItem('calendar-events')||'{}'); }
+      catch(e){ return {}; }
+    }
+    function saveEvents(obj){ localStorage.setItem('calendar-events', JSON.stringify(obj)); }
+
+    function renderWeekdays(){ weekdaysRow.innerHTML = weekdays.map(w=>`<div class="weekday">${w}</div>`).join(''); }
+
+    function renderCalendar(){
+      daysGrid.innerHTML = '';
+      const start = startOfMonth(viewDate);
+      const end = endOfMonth(viewDate);
+      const month = viewDate.getMonth();
+      const year = viewDate.getFullYear();
+
+      // title
+      const title = start.toLocaleString('es-ES',{month:'long'}) + ' ' + year;
+      monthYearEl.textContent = title.charAt(0).toUpperCase() + title.slice(1);
+
+      // weekday index: JS getDay gives 0=Dom ... we want Monday start -> convert
+      const firstWeekday = (start.getDay() + 6) % 7; // 0=Mon .. 6=Sun
+
+      // fill previous month's tail
+      const prevTail = firstWeekday;
+      const prevMonthLast = new Date(year, month, 0).getDate();
+      for(let i=prevTail-1;i>=0;i--){
+        const dayNum = prevMonthLast - i;
+        const date = new Date(year, month-1, dayNum);
+        const el = createDayCell(date, true);
+        daysGrid.appendChild(el);
+      }
+
+      // this month
+      for(let d=1; d<=end.getDate(); d++){
+        const date = new Date(year, month, d);
+        const el = createDayCell(date, false);
+        daysGrid.appendChild(el);
+      }
+
+      // next month's head to fill grid (42 cells max for 6 weeks)
+      while(daysGrid.children.length % 7 !== 0){
+        const nextIndex = daysGrid.children.length - (prevTail + end.getDate()) + 1;
+        const date = new Date(year, month+1, nextIndex);
+        const el = createDayCell(date, true);
+        daysGrid.appendChild(el);
+      }
+    }
+
+    function createDayCell(date, disabled){
+      const eventsObj = loadEvents();
+      const key = keyForDate(date);
+      const events = eventsObj[key] || [];
+
+      const el = document.createElement('div');
+      el.className = 'day' + (disabled? ' disabled':'');
+
+      if(isSameDay(date, new Date())) el.classList.add('today');
+
+      const dateEl = document.createElement('div');
+      dateEl.className = 'date';
+      dateEl.textContent = date.getDate();
+
+      el.appendChild(dateEl);
+
+      // events preview (show up to 2)
+      const evWrap = document.createElement('div');
+      evWrap.className = 'events';
+      events.slice(0,2).forEach(ev=>{
+        const evEl = document.createElement('div');
+        evEl.className = 'event-dot';
+        evEl.textContent = ev;
+        evWrap.appendChild(evEl);
+      });
+      if(events.length>2){
+        const more = document.createElement('div'); more.className='small'; more.textContent = `+${events.length-2} más`;
+        evWrap.appendChild(more);
+      }
+      el.appendChild(evWrap);
+
+      el.addEventListener('click', ()=>{
+        selectedDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+        updateSidePanel();
+      });
+
+      return el;
+    }
+
+    function isSameDay(a,b){ return a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate(); }
+
+    function updateSidePanel(){
+      if(!selectedDate){ selectedDateText.textContent = 'Selecciona una fecha'; eventsList.innerHTML=''; return; }
+      const key = keyForDate(selectedDate);
+      selectedDateText.textContent = selectedDate.toLocaleDateString('es-ES', {weekday:'long', year:'numeric', month:'long', day:'numeric'});
+      const eventsObj = loadEvents();
+      const arr = eventsObj[key] || [];
+      eventsList.innerHTML = '';
+      if(arr.length===0){ eventsList.innerHTML = '<p class="small">No hay eventos</p>'; }
+      else{
+        arr.forEach((ev,i)=>{
+          const card = document.createElement('div'); card.style.display='flex'; card.style.justifyContent='space-between'; card.style.alignItems='center';
+          const span = document.createElement('div'); span.textContent = ev; span.className='small';
+          const del = document.createElement('button'); del.textContent='Eliminar'; del.className='btn'; del.style.fontSize='12px';
+          del.addEventListener('click', ()=>{ arr.splice(i,1); eventsObj[key]=arr; saveEvents(eventsObj); renderCalendar(); updateSidePanel(); });
+          card.appendChild(span); card.appendChild(del); eventsList.appendChild(card);
+        });
+      }
+      eventInput.value = '';
+    }
+
+    // handlers
+    prevBtn.addEventListener('click', ()=>{ viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth()-1, 1); renderCalendar(); });
+    nextBtn.addEventListener('click', ()=>{ viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth()+1, 1); renderCalendar(); });
+    todayBtn.addEventListener('click', ()=>{ viewDate = new Date(); renderCalendar(); });
+
+    saveEventBtn.addEventListener('click', ()=>{
+      if(!selectedDate) return alert('Selecciona una fecha primero');
+      const text = eventInput.value.trim();
+      if(!text) return; 
+      const eventsObj = loadEvents();
+      const key = keyForDate(selectedDate);
+      if(!eventsObj[key]) eventsObj[key]=[];
+      eventsObj[key].push(text);
+      saveEvents(eventsObj);
+      renderCalendar(); updateSidePanel();
+    });
+
+    addQuick.addEventListener('click', ()=>{
+      const dateStr = prompt('Fecha para el evento (YYYY-MM-DD)', keyForDate(new Date()));
+      if(!dateStr) return;
+      const txt = prompt('Descripción del evento');
+      if(!txt) return;
+      const eventsObj = loadEvents();
+      if(!eventsObj[dateStr]) eventsObj[dateStr]=[];
+      eventsObj[dateStr].push(txt);
+      saveEvents(eventsObj);
+      renderCalendar();
+    });
+
+    // init
+    renderWeekdays(); renderCalendar(); updateSidePanel();
+
+  </script>
+</body>
+</html>
